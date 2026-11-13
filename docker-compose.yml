@@ -1,0 +1,46 @@
+# magpie 网关 —— 依据 https://usemagpie.ai/docs/zh/docker
+#
+# 首次启动：
+#   mkdir -p config
+#   sudo chown -R 65532:65532 config      # 容器以 nonroot (uid 65532) 运行
+#   cp .env.example .env                  # 填好 MAGPIE_WEB_KEY 等
+#   docker compose up -d
+#   docker compose logs magpie            # 日志里有带 ?k=... 的页面地址
+
+services:
+  magpie:
+    image: ghcr.io/yetone/magpie:${MAGPIE_TAG:-latest}
+    container_name: magpie
+    restart: unless-stopped
+
+    ports:
+      # 默认只发布在回环地址：用 SSH 隧道访问，例如
+      #   ssh -L 3430:127.0.0.1:3430 you@nas
+      # 要让局域网/VPN 的其他机器访问网关，见 .env 里的 MAGPIE_BIND。
+      - "${MAGPIE_BIND:-127.0.0.1}:3425:3425"   # 网关（Agent 调用）
+      - "${MAGPIE_BIND:-127.0.0.1}:3430:3430"   # Web 界面（同时响应 /v1）
+
+    environment:
+      # 其他机器访问网关用的地址；反向代理时写代理的 base URL
+      MAGPIE_PUBLIC_URL: ${MAGPIE_PUBLIC_URL:-http://127.0.0.1:3425}
+      # Web 界面 key，16 个以上字母数字或 - . _ ~，重启后不变
+      MAGPIE_WEB_KEY: ${MAGPIE_WEB_KEY:?请在 .env 中设置 MAGPIE_WEB_KEY}
+      # 只允许这些来源地址（IP / CIDR，逗号分隔）。不设置 = 所有地址都可用，各自仍需密钥
+      # MAGPIE_ALLOW_IPS: 203.0.113.7,10.0.0.0/8
+      # TLS：把证书和私钥挂进来，MAGPIE_PUBLIC_URL 也要改成 https://
+      # MAGPIE_TLS_CERT: /config/tls/fullchain.pem
+      # MAGPIE_TLS_KEY: /config/tls/privkey.pem
+      # 固定 Claude Code 版本，不自动更新
+      # DISABLE_AUTOUPDATER: "1"
+
+    volumes:
+      # 供应商、密钥、登录、插件、用量、缓存全在 /config 下
+      - ./config:/config
+      # TLS 证书示例：
+      # - ./tls:/config/tls:ro
+
+    # 不带 command 时只跑网关；带 web 才有浏览器界面
+    command: ["web", "--addr", "0.0.0.0:3430", "--no-open"]
+
+    # 镜像自带 HEALTHCHECK（magpie healthcheck），
+    # 其他服务可 depends_on: magpie: { condition: service_healthy }
